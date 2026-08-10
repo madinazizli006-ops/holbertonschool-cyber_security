@@ -1,0 +1,70 @@
+Incident Report: Web Application Vulnerability & DoS Attack Mitigation
+1. Introduction
+This report provides a detailed incident response analysis following a recent security event targeting our core web application infrastructure. The incident involved automated scanning, unauthorized directory traversal, and an explicit attempt to exhaust server resources through high-volume HTTP request flooding (Denial of Service).
+
+The primary purpose of this report is to document the nature and technical details of the attack, evaluate the system weaknesses exploited, and propose a comprehensive, industry-standard mitigation strategy—specifically addressing server resource limits and rate limiting—to ensure long-term availability and security.
+
+2. Detailed Attack Analysis
+Attack Vector & Targeted Endpoints: The attack targeted public-facing HTTP/HTTPS endpoints, specifically /login, /api/v1/search, and root directory structures (/admin, /config).
+
+Source & Tools Used: Log inspection revealed traffic originating from multiple external IP addresses using automated scanning utilities (such as Gobuster and custom Python-requests scripts) identified by repetitive User-Agent headers.
+
+Request Volume & Impact: A sustained spike of over 15,000 requests per minute was directed at dynamic backend endpoints. Because the server lacked request throttling, backend database connections were exhausted, CPU utilization reached 100%, and legitimate users experienced service degradation and HTTP 503 (Service Unavailable) errors.
+
+Security Weaknesses Identified:
+
+Lack of Rate Limiting: The server allowed unrestricted API calls and resource-intensive queries per IP address.
+
+Unvalidated Input Parameters: Dynamic search fields allowed expensive database queries to run unindexed.
+
+Verbose Error Messages: Exposed server stack traces provided attackers with internal path configurations.
+
+3. Proposed Mitigation Strategy
+To address both resource exhaustion and unauthorized scanning, we propose a multi-layered mitigation solution centered around Rate Limiting, Web Application Firewall (WAF) Integration, and Server Resource Controls.
+
+Rate Limiting & Throttling (Primary Solution): Implement HTTP rate limiting at the reverse proxy layer (e.g., Nginx / Cloudflare) to strictly cap the number of requests a single client IP can make within a given time frame (e.g., max 100 requests per minute for general endpoints, 5 requests per minute for authentication endpoints).
+
+Web Application Firewall (WAF): Deploy OWASP Core Rule Set (CRS) on the WAF to automatically block known exploit payloads and malicious user agents.
+
+Resource Limit Controls: Enforce strict process and connection pool limits (max_connections, timeout, and cgroup CPU/memory caps) at the application and web server levels to prevent any single process from hanging the entire server.
+
+4. Justification for the Proposed Solution
+Implementing rate limiting and resource boundary controls is the industry standard (aligned with OWASP Top 10 guidelines and NIST SP 800-44) for defending against application-layer Denial of Service (Layer 7 DoS) and automated brute-force attacks.
+
+Preventing Resource Exhaustion: By limiting how frequently a client can hit the server, attackers are prevented from consuming all backend threads or database connections.
+
+Cost & Efficiency: Rate limiting at the edge/reverse proxy drops malicious requests before they consume expensive application CPU or database resources.
+
+Minimal Legitimate Impact: Properly tuned thresholds ensure legitimate users continue to experience normal service speeds while malicious actors receive immediate HTTP 429 Too Many Requests responses.
+
+5. Steps for Implementation
+Step 1: Reverse Proxy Rate Limiting Configuration
+Configure rate limiting zones in Nginx (ngx_http_limit_req_module) or the cloud edge provider:
+
+Nginx
+# Limit login attempts to 5 requests per minute per IP
+limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;
+
+# Limit general API requests to 30 requests per minute
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=30r/m;
+Step 2: Application Layer Safeguards
+Enforce database query timeouts (e.g., maximum execution time of 2 seconds per query).
+
+Implement custom error pages to suppress internal stack traces and environment variables.
+
+Step 3: Server Resource Limit Enforcements
+Set maximum execution timeouts (max_execution_time) and client body size limits (client_max_body_size) in the web server configuration.
+
+Configure OS-level limits (ulimit / systemd service limits) to bound thread count and open file descriptors per web service process.
+
+6. Post-Implementation Monitoring
+To verify the ongoing effectiveness of the mitigations, the following monitoring protocol will be established:
+
+Log Analysis & Alerting: Integrate web server access and error logs with a centralized SIEM (e.g., ELK Stack, Splunk). Configure alerts when HTTP 429 (Rate Limited) or HTTP 403 (Forbidden) response spikes occur.
+
+Metric Dashboards: Monitor key system metrics—CPU utilization, memory usage, active connection pools, and response times—via Prometheus and Grafana.
+
+Automated Stress & Vulnerability Testing: Schedule bi-weekly load testing and vulnerability scans to test rate-limiting thresholds and ensure new endpoints comply with security policies.
+
+7. Conclusion
+The recent incident highlighted critical gaps in web application throttling and resource management, allowing automated traffic to impact overall system availability. By deploying rate limiting, restricting server resource bounds, and implementing continuous monitoring, the organization will effectively neutralize automated scanning and Layer 7 resource exhaustion attacks. Prioritizing these remediations is essential to guaranteeing business continuity, data integrity, and a secure user experience.
